@@ -1308,6 +1308,18 @@ def _ts() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+@app.get("/", tags=["System"])
+async def root():
+    """Root endpoint for health checks and API status."""
+    return {
+        "app": "Q-SonicFX Trading Bot API",
+        "status": _engine.state["status"],
+        "version": "1.0.0",
+        "docs": "/docs",
+        "timestamp": _ts(),
+    }
+
+
 @app.get("/status", response_model=StatusResponse, tags=["Control"])
 async def get_status():
     """
