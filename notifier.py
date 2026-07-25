@@ -40,20 +40,31 @@ class TelegramNotifier:
         bot_token: Optional[str] = None,
         chat_id: Optional[str] = None,
         enabled: bool = True,
+        min_alert_interval: float = 10.0,   # Minimum 10 seconds between Telegram messages
     ) -> None:
         self.bot_token = bot_token or os.getenv("TELEGRAM_BOT_TOKEN", "")
         self.chat_id = chat_id or os.getenv("TELEGRAM_CHAT_ID", "")
         self.enabled = enabled and bool(self.bot_token and self.chat_id)
+        self.min_alert_interval = min_alert_interval
+        self._last_send_time: float = 0.0
 
         if self.enabled:
-            logger.info("[Notifier] Telegram Alerts Enabled (Chat ID: %s)", self.chat_id)
+            logger.info("[Notifier] Telegram Alerts Enabled (Chat ID: %s, Cooldown: %ss)", self.chat_id, self.min_alert_interval)
         else:
             logger.info("[Notifier] Telegram Alerts Offline (Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to activate)")
 
     def send_message(self, text: str) -> bool:
-        """Send HTML formatted text message to Telegram chat."""
+        """Send HTML formatted text message to Telegram chat with rate-limit protection."""
         if not self.enabled:
             logger.info("[Notifier Mock] %s", text.replace("\n", " | "))
+            return False
+
+        import time
+        now = time.time()
+        # Cooldown guard: prevent Telegram spam when HFT trading loop executes rapidly
+        # Emergency Circuit Breaker alerts bypass the cooldown guard
+        if (now - self._last_send_time < self.min_alert_interval) and ("CIRCUIT BREAKER" not in text):
+            logger.debug("[Notifier] Throttled Telegram alert to prevent chat spam.")
             return False
 
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
@@ -74,7 +85,10 @@ class TelegramNotifier:
             )
             with urllib.request.urlopen(req, timeout=8.0) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-                return data.get("ok", False)
+                if data.get("ok", False):
+                    self._last_send_time = now
+                    return True
+                return False
         except Exception as e:
             logger.warning("[Notifier Error] Failed to send Telegram alert: %s", e)
             return False
