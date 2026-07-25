@@ -363,8 +363,11 @@ st.markdown(HFT_PRO_CSS, unsafe_allow_html=True)
 # Constants
 # ---------------------------------------------------------------------------
 
-BASE_URL       = "http://localhost:8000"
-WS_URL         = "ws://localhost:8000/ws/live"
+API_URL        = os.getenv("API_URL", "http://localhost:8000").rstrip("/")
+BASE_URL       = API_URL
+_ws_scheme     = "wss://" if BASE_URL.startswith("https://") else "ws://"
+_ws_host       = BASE_URL.replace("http://", "").replace("https://", "")
+WS_URL         = os.getenv("WS_URL", f"{_ws_scheme}{_ws_host}/ws/live")
 POLL_INTERVAL  = 2.0
 MAX_EQUITY_PTS = 500
 MAX_TRADES     = 10
@@ -469,12 +472,6 @@ _init_state()
 # ---------------------------------------------------------------------------
 # API Communication Layer
 # ---------------------------------------------------------------------------
-
-API_URL  = os.getenv("API_URL", "http://localhost:8000")
-BASE_URL = API_URL.rstrip("/")
-_ws_scheme = "wss://" if BASE_URL.startswith("https://") else "ws://"
-_ws_host   = BASE_URL.replace("http://", "").replace("https://", "")
-WS_URL   = os.getenv("WS_URL", f"{_ws_scheme}{_ws_host}/ws/live")
 
 def _headers() -> Dict[str, str]:
     h: Dict[str, str] = {"Content-Type": "application/json"}
@@ -851,7 +848,7 @@ def _render_orderbook_depth() -> None:
 (function() {{
     try {{
         if (!window.hftWsSubscriber) {{
-            const ws = new WebSocket("ws://localhost:8000/ws/live");
+            const ws = new WebSocket("{WS_URL}");
             ws.onmessage = function(evt) {{
                 try {{
                     const d = JSON.parse(evt.data);
@@ -1109,7 +1106,7 @@ def main() -> None:
         _render_live_telemetry()
 
         if st.session_state.get("status") == "OFFLINE":
-            st.markdown('<div style="background:#7F1D1D; color:#EF4444; padding:3px 8px; font-weight:700; margin-bottom:4px; border:1px solid #DC2626;">API CORE OFFLINE: http://localhost:8000</div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="background:#7F1D1D; color:#EF4444; padding:3px 8px; font-weight:700; margin-bottom:4px; border:1px solid #DC2626;">API CORE OFFLINE: {BASE_URL}</div>', unsafe_allow_html=True)
 
         if err := st.session_state.get("error_msg"):
             st.markdown(f'<div style="background:#7F1D1D; color:#EF4444; padding:3px 8px; font-weight:700; margin-bottom:4px; border:1px solid #DC2626;">ENGINE ALERT: {err}</div>', unsafe_allow_html=True)
