@@ -8,13 +8,14 @@ SERVICE_LOWER=$(echo "$RAW_SERVICE" | tr '[:upper:]' '[:lower:]')
 echo "[Q-SonicFX] Starting process... (Detected Service: '$RAW_SERVICE', Port: $PORT_TO_USE)"
 
 if [[ "$SERVICE_LOWER" == *"dashboard"* ]]; then
-    echo "[Q-SonicFX] Mode: Streamlit Dashboard on port $PORT_TO_USE"
-    exec streamlit run dashboard.py --server.address 0.0.0.0 --server.port $PORT_TO_USE --server.headless true
+    exec bash start_dashboard.sh
 elif [[ "$SERVICE_LOWER" == *"api"* ]]; then
-    echo "[Q-SonicFX] Mode: FastAPI Core Server on port $PORT_TO_USE"
-    exec uvicorn api_server:app --host 0.0.0.0 --port $PORT_TO_USE --log-level info
+    exec bash start_api.sh
 else
-    echo "[Q-SonicFX] Mode: Combined Server (FastAPI on internal port 8000, Streamlit on $PORT_TO_USE)"
-    uvicorn api_server:app --host 0.0.0.0 --port 8000 --log-level info &
-    exec streamlit run dashboard.py --server.address 0.0.0.0 --server.port $PORT_TO_USE --server.headless true
+    # Fallback when RAILWAY_SERVICE_NAME is unpopulated
+    if [ "$PORT_TO_USE" = "8000" ]; then
+        exec bash start_api.sh
+    else
+        exec bash start_dashboard.sh
+    fi
 fi
