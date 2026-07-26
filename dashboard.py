@@ -364,6 +364,26 @@ HFT_PRO_CSS = """
 </style>
 """
 st.markdown(HFT_PRO_CSS, unsafe_allow_html=True)
+st.markdown("""<script>
+(function() {
+    function unlockAudio() {
+        try {
+            var p = window.parent || window;
+            if (!p._hftAudioCtx) {
+                p._hftAudioCtx = new (p.AudioContext || p.webkitAudioContext)();
+            }
+            if (p._hftAudioCtx && p._hftAudioCtx.state === 'suspended') {
+                p._hftAudioCtx.resume();
+            }
+        } catch(e) {}
+    }
+    try {
+        var pDoc = (window.parent || window).document;
+        pDoc.addEventListener('click', unlockAudio, { once: false });
+        pDoc.addEventListener('touchstart', unlockAudio, { once: false });
+    } catch(e) {}
+})();
+</script>""", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -391,51 +411,62 @@ import streamlit.components.v1 as components
 
 def play_audio_feedback(sound_type: str = "click") -> None:
     """
-    Synthesize real-time tactile sound effects using browser Web Audio API inside a 0px Streamlit component iframe.
+    Synthesize real-time tactile sound effects and mobile haptic feedback using browser Web Audio API.
+    Uses parent window AudioContext to bypass iframe autoplay restrictions cleanly across all browsers.
     Sound Types: 'click', 'start', 'pause', 'stop', 'trade', 'tick', 'alert'
     """
     js_code = f"""
     <script>
     (function() {{
         try {{
-            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            var p = window.parent || window;
+            if (!p._hftAudioCtx) {{
+                p._hftAudioCtx = new (p.AudioContext || p.webkitAudioContext)();
+            }}
+            var ctx = p._hftAudioCtx;
             if (ctx.state === 'suspended') {{
                 ctx.resume();
             }}
             
             function synthTone(freq, type, duration, gainVal, freqRamp) {{
                 try {{
-                    const osc = ctx.createOscillator();
-                    const gain = ctx.createGain();
+                    var osc = ctx.createOscillator();
+                    var gain = ctx.createGain();
                     osc.type = type || 'sine';
                     osc.frequency.setValueAtTime(freq, ctx.currentTime);
                     if (freqRamp) {{
                         osc.frequency.exponentialRampToValueAtTime(freqRamp, ctx.currentTime + duration);
                     }}
-                    gain.gain.setValueAtTime(gainVal || 0.18, ctx.currentTime);
+                    gain.gain.setValueAtTime(gainVal || 0.25, ctx.currentTime);
                     gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
                     osc.connect(gain);
                     gain.connect(ctx.destination);
-                    osc.start();
+                    osc.start(ctx.currentTime);
                     osc.stop(ctx.currentTime + duration);
                 }} catch(e) {{}}
             }}
             
-            const sType = "{sound_type}";
+            var sType = "{sound_type}";
             if (sType === "click") {{
-                synthTone(900, "sine", 0.025, 0.15, 1400);
+                synthTone(900, "sine", 0.04, 0.25, 1400);
+                if (p.navigator && p.navigator.vibrate) p.navigator.vibrate(15);
             }} else if (sType === "start") {{
-                synthTone(440, "sine", 0.12, 0.22, 880);
+                synthTone(440, "sine", 0.15, 0.30, 880);
+                if (p.navigator && p.navigator.vibrate) p.navigator.vibrate([20, 30, 20]);
             }} else if (sType === "pause") {{
-                synthTone(600, "triangle", 0.12, 0.20, 300);
+                synthTone(600, "triangle", 0.15, 0.25, 300);
+                if (p.navigator && p.navigator.vibrate) p.navigator.vibrate([15, 20]);
             }} else if (sType === "stop") {{
-                synthTone(1100, "sawtooth", 0.25, 0.25, 300);
+                synthTone(300, "sawtooth", 0.25, 0.30, 120);
+                if (p.navigator && p.navigator.vibrate) p.navigator.vibrate([40, 50, 40]);
             }} else if (sType === "trade") {{
-                synthTone(1050, "sine", 0.08, 0.25, 1500);
+                synthTone(1050, "sine", 0.10, 0.30, 1500);
+                if (p.navigator && p.navigator.vibrate) p.navigator.vibrate([25, 25]);
             }} else if (sType === "tick") {{
-                synthTone(500, "sine", 0.015, 0.10, 700);
+                synthTone(500, "sine", 0.02, 0.15, 700);
             }} else if (sType === "alert") {{
-                synthTone(1200, "sawtooth", 0.30, 0.30, 400);
+                synthTone(1200, "sawtooth", 0.35, 0.35, 400);
+                if (p.navigator && p.navigator.vibrate) p.navigator.vibrate([50, 50, 50]);
             }}
         }} catch(e) {{}}
     }})();
