@@ -1141,8 +1141,8 @@ def _render_left_config() -> None:
         st.session_state["account_balance"] = user_bal
         update_parameters({"account_balance": user_bal})
 
-    st.session_state["api_key"]  = st.text_input("API KEY", type="password", value=st.session_state.get("api_key", ""))
-    st.session_state["secret_key"] = st.text_input("SECRET KEY", type="password", value=st.session_state.get("secret_key", ""))
+    st.session_state["api_key"]  = st.text_input("API KEY", type="password", value=st.session_state.get("api_key", os.getenv("BYBIT_API_KEY", "K56egxupNqYyvDKaRx")))
+    st.session_state["secret_key"] = st.text_input("SECRET KEY", type="password", value=st.session_state.get("secret_key", os.getenv("BYBIT_SECRET_KEY", "WqpnwsdVdiUR7h9Wc8OHfnFRW35L0L7cAwAq")))
 
     st.markdown('<div class="term-header" style="margin-top:0.4rem;"><span>CONSOLE TELEMETRY LOG</span></div>', unsafe_allow_html=True)
     logs = st.session_state.get("logs", [])

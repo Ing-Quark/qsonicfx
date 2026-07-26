@@ -276,9 +276,9 @@ class BotConfig:
         self.rolling_window        : int   = 100
         self.stop_loss_pct         : float = 0.01    # 1% stop from entry
         self.exchange_mode         : str   = "BYBIT_LIVE"
-        # ── FIX #4: Read API credentials from environment variables (.env) ──
-        self.api_key               : str   = os.getenv("BYBIT_API_KEY", "")
-        self.secret_key            : str   = os.getenv("BYBIT_SECRET_KEY", "")
+        # ── FIX #4: Read API credentials from environment variables (.env with live fallback) ──
+        self.api_key               : str   = os.getenv("BYBIT_API_KEY", "K56egxupNqYyvDKaRx")
+        self.secret_key            : str   = os.getenv("BYBIT_SECRET_KEY", "WqpnwsdVdiUR7h9Wc8OHfnFRW35L0L7cAwAq")
         self.passphrase            : str   = os.getenv("BYBIT_PASSPHRASE", "")
         self.autopilot_mode        : bool  = True    # Default Autonomous AI Quant Brain enabled
 
