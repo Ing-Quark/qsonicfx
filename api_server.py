@@ -561,7 +561,7 @@ class TradingEngine:
         if _HAS_CB and CircuitBreaker is not None:
             CircuitBreaker.reset_singleton()
             self._cb = CircuitBreaker(
-                initial_balance    = max(100.0, self.config.account_balance),
+                initial_balance    = self.config.account_balance if self.config.account_balance > 0 else 0.0,
                 max_daily_loss_pct = 0.05,
                 max_drawdown_pct   = 0.10,
             )
@@ -1518,11 +1518,7 @@ async def get_status():
         balance_cached_at = last_updated.isoformat()
 
     # Keep config.account_balance in sync for trading loop position sizer
-    if bal > 0.0:
-        _engine.config.account_balance = bal
-    elif _engine.config.account_balance == 0.0:
-        _engine.config.account_balance = 1000.0   # Simulated fallback
-        bal = 1000.0
+    _engine.config.account_balance = bal
     # ────────────────────────────────────────────────────────────────────────
 
     upnl     = pos.get("unrealized_pnl", 0.0) if pos else 0.0

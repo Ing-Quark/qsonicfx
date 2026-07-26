@@ -214,7 +214,7 @@ class CircuitBreaker:
             return   # singleton: skip re-init on subsequent calls
 
         if initial_balance <= 0:
-            raise ValueError(f"initial_balance must be > 0, got {initial_balance}")
+            initial_balance = 0.0001
 
         self.initial_balance      : float            = float(initial_balance)
         self.max_daily_loss_pct   : float            = float(max_daily_loss_pct)

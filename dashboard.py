@@ -692,9 +692,9 @@ def _render_equity_chart(equity_history: List[Dict]) -> None:
                     except Exception:
                         formatted_ts.append(raw_t[11:19] if len(raw_t) >= 19 else raw_t)
 
-                eq = [p.get("equity", 100_000.0) for p in equity_history]
+                eq = [p.get("equity", 0.0) for p in equity_history]
 
-                peak_val = eq[0] if eq else 100_000.0
+                peak_val = eq[0] if eq else 0.0
                 peak = []
                 for e in eq:
                     peak_val = max(peak_val, e)
@@ -836,7 +836,7 @@ def _render_top_strip() -> None:
         )
     )
 
-    equity     = sd.get("account_balance", cb.get("current_balance", 100_000.0))
+    equity     = sd.get("account_balance", cb.get("current_balance", 0.0))
     avail_bal  = sd.get("available_balance", equity)
     used_marg  = sd.get("used_margin", 0.0)
     unreal_pnl = sd.get("unrealized_pnl", 0.0)
