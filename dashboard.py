@@ -1112,7 +1112,7 @@ def _render_left_config() -> None:
     st.markdown('<div class="term-header"><span>INSTRUMENT & CONFIG</span></div>', unsafe_allow_html=True)
     st.session_state["exchange_mode"] = st.selectbox(
         "EXCHANGE",
-        ["BYBIT_TESTNET", "BYBIT_LIVE", "BINANCE_TESTNET", "BINANCE_LIVE", "BITGET_LIVE", "SIMULATED"],
+        ["BYBIT_LIVE", "BYBIT_TESTNET", "BINANCE_LIVE", "BINANCE_TESTNET", "BITGET_LIVE", "SIMULATED"],
         index=0
     )
     coin_data = get_coins()
@@ -1133,8 +1133,10 @@ def _render_left_config() -> None:
     )
     st.session_state["interval"] = st.selectbox("RESOLUTION", ["1m", "5m", "15m", "1h"])
     
-    init_bal = float(st.session_state.get("account_balance", 1000.0))
-    user_bal = st.number_input("ACCOUNT CAPITAL (USDT)", min_value=10.0, max_value=10_000_000.0, value=init_bal, step=100.0)
+    init_bal = float(st.session_state.get("account_balance", 1.20))
+    if init_bal < 0.10:
+        init_bal = 1.20
+    user_bal = st.number_input("ACCOUNT CAPITAL (USDT)", min_value=0.10, max_value=10_000_000.0, value=init_bal, step=1.0)
     if user_bal != st.session_state.get("account_balance"):
         st.session_state["account_balance"] = user_bal
         update_parameters({"account_balance": user_bal})

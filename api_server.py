@@ -1555,6 +1555,21 @@ async def start_bot():
     _engine.state["status"] = "RUNNING"
     logger.info("[API] Bot STARTED via /start (CircuitBreaker reset)")
     await _ws_mgr.broadcast({"type": "STATUS_CHANGE", "status": "RUNNING", "timestamp": _ts()})
+
+    if _HAS_NOTIFIER and _engine._notifier is not None:
+        bal = _engine._cached_balance.get("balance", _engine.config.account_balance)
+        mode = _engine.config.trading_mode.upper()
+        sym = _engine.config.symbol
+        asyncio.ensure_future(asyncio.to_thread(
+            _engine._notifier.send_message,
+            f"🚀 <b>Q-SONICFX LIVE TRADING STARTED</b>\n\n"
+            f"• <b>Account Balance:</b> <code>${bal:.4f} USDT</code>\n"
+            f"• <b>Trading Mode:</b> <code>{mode}</code>\n"
+            f"• <b>Active Target:</b> <code>{sym}</code>\n"
+            f"• <b>Autopilot:</b> <code>ACTIVE</code>\n\n"
+            f"🕒 <code>{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}</code>"
+        ))
+
     return ActionResponse(success=True, message="Trading loop started.", timestamp=_ts())
 
 
@@ -1566,6 +1581,15 @@ async def pause_bot():
     _engine.state["status"] = "PAUSED"
     logger.info("[API] Bot PAUSED via /pause")
     await _ws_mgr.broadcast({"type": "STATUS_CHANGE", "status": "PAUSED", "timestamp": _ts()})
+
+    if _HAS_NOTIFIER and _engine._notifier is not None:
+        asyncio.ensure_future(asyncio.to_thread(
+            _engine._notifier.send_message,
+            f"⏸️ <b>Q-SONICFX LIVE TRADING PAUSED</b>\n\n"
+            f"• <b>Action:</b> New entries paused. Open positions kept.\n"
+            f"🕒 <code>{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}</code>"
+        ))
+
     return ActionResponse(success=True, message="Bot paused. Open positions kept.", timestamp=_ts())
 
 
@@ -1585,6 +1609,16 @@ async def stop_bot():
         "status"   : "HALTED",
         "timestamp": _ts(),
     })
+
+    if _HAS_NOTIFIER and _engine._notifier is not None:
+        asyncio.ensure_future(asyncio.to_thread(
+            _engine._notifier.send_message,
+            f"🛑 <b>Q-SONICFX EMERGENCY STOP EXECUTED</b>\n\n"
+            f"• <b>Status:</b> Engine Halted\n"
+            f"• <b>Steps:</b> {len(shutdown_result.get('steps', []))} shutdown steps executed.\n"
+            f"🕒 <code>{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}</code>"
+        ))
+
     return ActionResponse(
         success   = True,
         message   = f"Emergency stop executed. {len(shutdown_result.get('steps', []))} shutdown steps.",
@@ -1600,9 +1634,23 @@ async def resume_bot():
     if _HAS_CB and _engine._cb is not None:
         _engine._cb.halted_until         = None
         _engine._cb._is_emergency_halted = False
+        _engine._cb.daily_realized_pnl   = 0.0
+        _engine._cb.daily_drawdown_pct   = 0.0
+        _engine._cb.trailing_drawdown_pct= 0.0
     _engine.state["status"] = "RUNNING"
     logger.warning("[API] Bot RESUMED (cooldown bypassed) via /resume")
     await _ws_mgr.broadcast({"type": "STATUS_CHANGE", "status": "RUNNING", "timestamp": _ts()})
+
+    if _HAS_NOTIFIER and _engine._notifier is not None:
+        bal = _engine._cached_balance.get("balance", _engine.config.account_balance)
+        asyncio.ensure_future(asyncio.to_thread(
+            _engine._notifier.send_message,
+            f"🔄 <b>Q-SONICFX LIVE TRADING RESUMED</b>\n\n"
+            f"• <b>Balance:</b> <code>${bal:.4f} USDT</code>\n"
+            f"• <b>Risk Status:</b> Cooldown Bypassed & Failsafes Reset\n"
+            f"🕒 <code>{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}</code>"
+        ))
+
     return ActionResponse(success=True, message="Cooldown bypassed. Bot resumed.", timestamp=_ts())
 
 
