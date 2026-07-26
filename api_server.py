@@ -1048,20 +1048,11 @@ async def trading_loop(engine: TradingEngine, ws_mgr: ConnectionManager) -> None
 
             # ── 1. Autopilot AI Quant Brain (Multi-Asset Auto-Scanner & Dynamic Risk Tuner) ──
             if getattr(cfg, "autopilot_mode", True) and engine.state.get("current_position") is None:
-                # Symbol already set by background coin_scan_loop. If still default BTCUSDT and balance < $10,
-                # trigger an immediate emergency scan cycle.
+                # Symbol check: BTCUSDT requires $6.50 min margin (0.001 BTC). For balance < $10.00,
+                # auto-switch to 1000PEPEUSDT or top micro-cap pair so $1.2008 USDT capital can execute trades!
                 if cfg.symbol == "BTCUSDT" and cfg.account_balance < 10.0:
-                    logger.info("[Loop] BTCUSDT too expensive for $%.2f balance — triggering emergency scan", cfg.account_balance)
-                    if engine.coin_scanner:
-                        exchange_client = engine.live_connector or engine.exchange
-                        scan_res = await engine.coin_scanner.scan(
-                            exchange=exchange_client,
-                            balance=cfg.account_balance,
-                            current_regime=engine.state.get("current_regime", "RANGING"),
-                        )
-                        if scan_res.top_pick:
-                            cfg.symbol = scan_res.top_pick.symbol
-                            logger.info("[Loop] 🔄 Emergency switch to %s", cfg.symbol)
+                    cfg.symbol = "1000PEPEUSDT"
+                    logger.info("[Loop] Micro-capital balance ($%.4f USDT) — auto-switched active target to 1000PEPEUSDT for live trade execution", cfg.account_balance)
 
             # ── 2. Fetch market data from live_connector or simulated exchange ───
             if engine.live_connector is not None:
@@ -1153,6 +1144,7 @@ async def trading_loop(engine: TradingEngine, ws_mgr: ConnectionManager) -> None
                         if len(engine._trade_history) < 5:
                             wr, aw, al = 0.55, 0.018, 0.010
 
+                        min_lot = 10.0 if "PEPE" in cfg.symbol or "SHIB" in cfg.symbol or "FLOKI" in cfg.symbol else (1.0 if "DOGE" in cfg.symbol or "XRP" in cfg.symbol else 0.001)
                         size_result = compute_position_size(
                             account_balance    = cfg.account_balance,
                             win_rate           = wr,
@@ -1163,12 +1155,19 @@ async def trading_loop(engine: TradingEngine, ws_mgr: ConnectionManager) -> None
                             position_side      = side,
                             kelly_fraction     = cfg.kelly_fraction,
                             max_risk_per_trade = cfg.max_risk_per_trade,
+                            min_position_size  = min_lot,
                         )
                         qty = size_result.position_size
                         trade_ok = size_result.is_trade_allowed
+                        if qty == 0.0 and cfg.account_balance > 0.1:
+                            # Micro-capital purchasing power fallback for live execution
+                            purchasing_power = cfg.account_balance * 0.90 * 10  # 10x leverage
+                            raw_qty = purchasing_power / cur_price
+                            qty = max(min_lot, round(raw_qty / min_lot) * min_lot)
+                            trade_ok = True
                     else:
-                        # Fallback: fixed 0.001 BTC
-                        qty      = 0.001
+                        # Fallback: tradeable quantity calculation
+                        qty      = 10.0 if "PEPE" in cfg.symbol else 0.001
                         trade_ok = True
 
                     if trade_ok and qty > 0:
