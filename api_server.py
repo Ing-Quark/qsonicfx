@@ -276,6 +276,7 @@ class BotConfig:
         self.rolling_window        : int   = 100
         self.stop_loss_pct         : float = 0.01    # 1% stop from entry
         self.exchange_mode         : str   = "BYBIT_LIVE"
+        self.trading_mode          : str   = "SPOT"
         # ── FIX #4: Read API credentials from environment variables (.env with live fallback) ──
         self.api_key               : str   = os.getenv("BYBIT_API_KEY", "K56egxupNqYyvDKaRx")
         self.secret_key            : str   = os.getenv("BYBIT_SECRET_KEY", "WqpnwsdVdiUR7h9Wc8OHfnFRW35L0L7cAwAq")
@@ -628,6 +629,26 @@ class TradingEngine:
                 passphrase=self.config.passphrase,
             )
             logger.info("[Engine] Live connector re-initialized for mode=%s", self.config.exchange_mode)
+
+    def get_effective_balance(self) -> float:
+        """Return cached live balance, or synchronously fetch from connector if cache is 0.0."""
+        bal = float(self._cached_balance.get("balance", 0.0) or 0.0)
+        if bal > 0:
+            return bal
+        if self.live_connector is not None and self.config.exchange_mode != "SIMULATED":
+            try:
+                bal_data = self.live_connector.fetch_balance()
+                b = float(bal_data.get("balance", 0.0) or 0.0)
+                if b > 0:
+                    self._cached_balance["balance"] = b
+                    self._cached_balance["equity"] = float(bal_data.get("equity", b) or b)
+                    self._cached_balance["available_margin"] = float(bal_data.get("available_margin", b) or b)
+                    self._cached_balance["last_updated"] = datetime.now(timezone.utc)
+                    self.config.account_balance = b
+                    return b
+            except Exception as e:
+                logger.warning("[Engine] get_effective_balance fetch failed: %s", e)
+        return float(self.config.account_balance or 0.0)
 
     # ── FIX #1: Background balance fetch loop ──────────────────────────
 
@@ -1602,8 +1623,8 @@ async def start_bot():
     await _ws_mgr.broadcast({"type": "STATUS_CHANGE", "status": "RUNNING", "timestamp": _ts()})
 
     if _HAS_NOTIFIER and _engine._notifier is not None:
-        bal = _engine._cached_balance.get("balance", _engine.config.account_balance)
-        mode = _engine.config.trading_mode.upper()
+        bal = _engine.get_effective_balance()
+        mode = _engine.config.exchange_mode.upper()
         sym = _engine.config.symbol
         asyncio.ensure_future(asyncio.to_thread(
             _engine._notifier.send_message,
