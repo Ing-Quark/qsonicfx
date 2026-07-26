@@ -12,10 +12,9 @@ if [[ "$SERVICE_LOWER" == *"dashboard"* ]]; then
 elif [[ "$SERVICE_LOWER" == *"api"* ]]; then
     exec bash start_api.sh
 else
-    # Fallback when RAILWAY_SERVICE_NAME is unpopulated
-    if [ "$PORT_TO_USE" = "8000" ]; then
-        exec bash start_api.sh
-    else
-        exec bash start_dashboard.sh
-    fi
+    echo "[Q-SonicFX] Combined Mode: Starting FastAPI backend on port 8000 and Streamlit on port $PORT_TO_USE..."
+    uvicorn api_server:app --host 127.0.0.1 --port 8000 --log-level info &
+    sleep 2
+    export API_URL="http://127.0.0.1:8000"
+    exec bash start_dashboard.sh
 fi
