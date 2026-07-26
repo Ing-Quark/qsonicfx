@@ -641,6 +641,23 @@ class SimulatedExchangeClient(BaseExchangeClient):
     def fetch_positions(self, symbol: str = "") -> List[Dict[str, Any]]:
         return self.positions
 
+    def fetch_instruments_info(self, category: str = "linear") -> List[Dict[str, Any]]:
+        return [
+            {"symbol": "BTCUSDT", "status": "Trading", "min_qty": 0.001, "max_qty": 100.0, "qty_step": 0.001, "min_notional": 5.0, "tick_size": 0.1, "min_price": 0.1, "leverage_filter": {}},
+            {"symbol": "ETHUSDT", "status": "Trading", "min_qty": 0.01, "max_qty": 1000.0, "qty_step": 0.01, "min_notional": 5.0, "tick_size": 0.01, "min_price": 0.01, "leverage_filter": {}},
+            {"symbol": "SOLUSDT", "status": "Trading", "min_qty": 0.1, "max_qty": 5000.0, "qty_step": 0.1, "min_notional": 5.0, "tick_size": 0.01, "min_price": 0.01, "leverage_filter": {}},
+            {"symbol": "DOGEUSDT", "status": "Trading", "min_qty": 10.0, "max_qty": 1000000.0, "qty_step": 10.0, "min_notional": 1.0, "tick_size": 0.0001, "min_price": 0.0001, "leverage_filter": {}},
+            {"symbol": "PEPEUSDT", "status": "Trading", "min_qty": 1000.0, "max_qty": 100000000.0, "qty_step": 1000.0, "min_notional": 1.0, "tick_size": 0.0000001, "min_price": 0.0000001, "leverage_filter": {}},
+        ]
+
+    def fetch_klines(self, symbol: str, interval: str = "1", limit: int = 60) -> pd.DataFrame:
+        import numpy as np
+        prices = self.mid_price + np.cumsum(np.random.normal(0, 10, limit))
+        idx = pd.date_range(end=datetime.now(timezone.utc), periods=limit, freq="1min")
+        return pd.DataFrame({
+            "open": prices, "high": prices + 5, "low": prices - 5, "close": prices, "volume": 100.0
+        }, index=idx)
+
     def create_order(
         self,
         symbol: str,

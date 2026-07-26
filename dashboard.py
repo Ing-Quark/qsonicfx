@@ -27,6 +27,12 @@ import requests
 import streamlit as st
 from dotenv import load_dotenv
 
+try:
+    from streamlit_autorefresh import st_autorefresh
+    _HAS_AUTOREFRESH = True
+except ImportError:
+    _HAS_AUTOREFRESH = False
+
 load_dotenv()
 
 # ---------------------------------------------------------------------------
@@ -468,6 +474,10 @@ def _init_state() -> None:
             st.session_state[k] = v
 
 _init_state()
+
+# ── Auto-Refresh Engine: 2000ms live stream polling (Zero manual page refreshes) ──
+if _HAS_AUTOREFRESH:
+    st_autorefresh(interval=2000, key="hft_live_refresh_ticker")
 
 # ---------------------------------------------------------------------------
 # API Communication Layer
