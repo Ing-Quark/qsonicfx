@@ -602,19 +602,30 @@ class TradingEngine:
             _HAS_REGIME, _HAS_OBI, _HAS_SIZER, _HAS_CB, _HAS_WFO, _HAS_NOTIFIER,
         )
 
+    def reinit_connector(self) -> None:
+        """Re-initialize exchange connector with updated config parameters."""
+        if _HAS_EXCHANGE and get_exchange_client is not None:
+            self.live_connector = get_exchange_client(
+                mode=self.config.exchange_mode,
+                api_key=self.config.api_key,
+                secret_key=self.config.secret_key,
+                passphrase=self.config.passphrase,
+            )
+            logger.info("[Engine] Live connector re-initialized for mode=%s", self.config.exchange_mode)
+
     # ── FIX #1: Background balance fetch loop ──────────────────────────
 
     async def _balance_fetch_loop(self) -> None:
         """
-        Background task: fetches live exchange balance every 30 seconds and
+        Background task: fetches live exchange balance every 15 seconds and
         stores the result in self._cached_balance.
 
         - First fetch happens immediately (no initial delay).
-        - On failure: logs WARNING, retains last known values, retries in 30s.
+        - On failure: logs WARNING, retains last known values, retries in 15s.
         - /status reads from cache → near-instant response (<5ms).
         """
         STALE_THRESHOLD_SECONDS = 300   # 5 minutes
-        FETCH_INTERVAL_SECONDS  = 30
+        FETCH_INTERVAL_SECONDS  = 15
 
         logger.info("[Balance] Background cache task started. First fetch immediately.")
 
@@ -1711,6 +1722,25 @@ async def update_parameters(params: ParametersUpdate):
     changed = _config.update(params)
     if not changed:
         return ActionResponse(success=True, message="No parameters changed.", timestamp=_ts())
+
+    # Re-initialize connector if exchange mode, api key, or secret key changed
+    if any(k.startswith("exchange_mode") or k.startswith("api_key") or k.startswith("secret_key") for k in changed):
+        _engine.reinit_connector()
+        if _engine.live_connector is not None:
+            try:
+                bal_data = await asyncio.to_thread(_engine.live_connector.fetch_balance)
+                eq = float(bal_data.get("equity", 0.0) or 0.0)
+                bal = float(bal_data.get("balance", 0.0) or 0.0)
+                avail = float(bal_data.get("available_margin", 0.0) or 0.0)
+                if bal > 0:
+                    _engine._cached_balance = {
+                        "equity": eq, "balance": bal, "available_margin": avail,
+                        "last_updated": datetime.now(timezone.utc),
+                    }
+                    _engine.config.account_balance = bal
+            except Exception as e:
+                logger.warning("[API] Parameter update balance fetch failed: %s", e)
+
     logger.info("[API] Parameters updated: %s", changed)
     await _ws_mgr.broadcast({
         "type"   : "PARAM_UPDATE",
