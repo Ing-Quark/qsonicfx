@@ -510,6 +510,9 @@ _init_state()
 if _HAS_AUTOREFRESH:
     st_autorefresh(interval=2000, key="hft_live_refresh_ticker")
 
+# Always call refresh_data() to fetch live REST API telemetry on every 2s refresh tick
+refresh_data()
+
 # ---------------------------------------------------------------------------
 # API Communication Layer
 # ---------------------------------------------------------------------------
