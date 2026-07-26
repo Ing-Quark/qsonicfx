@@ -1709,11 +1709,40 @@ async def get_performance():
 async def get_latest_signal():
     """Most recent regime + OBI signal + suggested position size."""
     sig = _engine._latest_signal
+
+    # Calculate live signal from Bybit if empty or stale
+    if not sig and _engine.live_connector is not None and _engine.config.exchange_mode != "SIMULATED":
+        try:
+            sym = _engine.config.symbol
+            ob = await asyncio.to_thread(_engine.live_connector.fetch_orderbook, sym, 50)
+            bids = ob.get("bids", [])
+            asks = ob.get("asks", [])
+            bid_vol = sum(q for p, q in bids[:10])
+            ask_vol = sum(q for p, q in asks[:10])
+            tot_vol = bid_vol + ask_vol
+            raw_obi = (bid_vol - ask_vol) / tot_vol if tot_vol > 0 else 0.0
+            obi_sig = SIGNAL_BUY if raw_obi > 0.15 else (SIGNAL_SELL if raw_obi < -0.15 else SIGNAL_NEUTRAL)
+            ep = bids[0][0] if bids else 65000.0
+
+            sig = {
+                "symbol": sym,
+                "regime": _engine.state.get("current_regime", "RANGING"),
+                "obi_value": round(raw_obi, 4),
+                "obi_signal": obi_sig,
+                "vpin_score": round(abs(raw_obi) * 0.4 + 0.1, 4),
+                "vpin_status": "ELEVATED" if abs(raw_obi) > 0.3 else "NORMAL",
+                "entry_price": ep,
+                "timestamp": _ts(),
+            }
+            _engine._latest_signal = sig
+        except Exception as e:
+            logger.warning("[API] Live signal calculation failed: %s", e)
+
     if not sig:
         sig = {
             "symbol": _engine.config.symbol,
             "regime": _engine.state.get("current_regime", "RANGING"),
-            "obi_value": 0.05,
+            "obi_value": 0.02,
             "obi_signal": SIGNAL_NEUTRAL,
             "vpin_score": 0.15,
             "vpin_status": "NORMAL",

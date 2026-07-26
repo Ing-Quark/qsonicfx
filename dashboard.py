@@ -1030,7 +1030,7 @@ def _render_risk_params() -> None:
 
     sd = st.session_state.get("last_status_data", {})
     cb = sd.get("circuit_breaker", {})
-    bal = cb.get("current_balance", 100_000.0)
+    bal = sd.get("account_balance", st.session_state.get("account_balance", 1.20))
 
     with st.form("params_form"):
         kf  = st.slider("Kelly Fraction (f*)", 0.05, 1.0, float(st.session_state["kelly_fraction"]), 0.05)
