@@ -206,23 +206,52 @@ class BybitLinearConnector(BaseExchangeClient):
         return ob_data
 
     def fetch_balance(self) -> Dict[str, Any]:
-        try:
-            # 1. Query UNIFIED Account
-            res_u = self._request("GET", "/v5/asset/transfer/query-account-coin-balance", {"accountType": "UNIFIED", "coin": "USDT"})
-            bal_u = float(res_u.get("result", {}).get("balance", {}).get("walletBalance", 0.0) or 0.0)
-            avail_u = float(res_u.get("result", {}).get("balance", {}).get("transferBalance", 0.0) or 0.0)
-            
-            # 2. Query FUNDING Account
-            res_f = self._request("GET", "/v5/asset/transfer/query-account-coin-balance", {"accountType": "FUND", "coin": "USDT"})
-            bal_f = float(res_f.get("result", {}).get("balance", {}).get("walletBalance", 0.0) or 0.0)
-            
-            tot_bal = round(bal_u + bal_f, 4)
-            if tot_bal > 0:
-                return {"equity": tot_bal, "balance": tot_bal, "available_margin": round(avail_u if bal_u > 0 else bal_f, 4)}
-        except Exception:
-            pass
+        total_balance = 0.0
+        total_equity = 0.0
+        avail_margin = 0.0
 
-        return {"equity": 0.0, "balance": 0.0, "available_margin": 0.0}
+        # 1. Primary: Bybit V5 UNIFIED Wallet Balance
+        try:
+            res = self._request("GET", "/v5/account/wallet-balance", {"accountType": "UNIFIED"})
+            if res.get("retCode") == 0:
+                list_data = res.get("result", {}).get("list", [])
+                if list_data:
+                    coins = list_data[0].get("coin", [])
+                    for c in coins:
+                        wb = float(c.get("walletBalance", 0) or 0)
+                        eq = float(c.get("equity", 0) or wb)
+                        avail = float(c.get("availableToWithdraw", 0) or wb)
+                        coin_name = c.get("coin", "")
+                        if coin_name == "USDT":
+                            total_balance += wb
+                            total_equity += eq
+                            avail_margin += avail
+                        elif wb > 0 and coin_name != "USDT":
+                            total_equity += eq
+        except Exception as e:
+            logger.warning("[fetch_balance] UNIFIED balance query failed: %s", e)
+
+        # 2. Fallback: Query FUNDING Account
+        if total_balance == 0.0:
+            try:
+                res_f = self._request("GET", "/v5/asset/transfer/query-account-coin-balance", {"accountType": "FUND", "coin": "USDT"})
+                bal_f = float(res_f.get("result", {}).get("balance", {}).get("walletBalance", 0.0) or 0.0)
+                if bal_f > 0:
+                    total_balance = bal_f
+                    total_equity = bal_f
+                    avail_margin = bal_f
+            except Exception:
+                pass
+
+        total_balance = round(total_balance, 4)
+        total_equity = round(total_equity, 4)
+        avail_margin = round(avail_margin, 4)
+
+        return {
+            "equity": total_equity,
+            "balance": total_balance,
+            "available_margin": avail_margin if avail_margin > 0 else total_balance,
+        }
 
     def fetch_positions(self, symbol: str = "") -> List[Dict[str, Any]]:
         params: Dict[str, Any] = {"category": "linear", "settleCoin": "USDT"}

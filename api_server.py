@@ -638,6 +638,18 @@ class TradingEngine:
                 # Also sync config.account_balance so trading loop uses live value
                 self.config.account_balance = balance
 
+                # Sync Circuit Breaker balance & auto-clear cooldown on new deposit
+                if _HAS_CB and self._cb is not None and balance > 0:
+                    if self._cb.current_balance != balance:
+                        self._cb.current_balance = balance
+                        self._cb.peak_balance = max(self._cb.peak_balance, balance)
+                        if self._cb.initial_balance <= 1.0 and balance > 1.0:
+                            self._cb.initial_balance = balance
+                            self._cb.initial_daily_balance = balance
+                            self._cb.halted_until = None
+                            self._cb._is_emergency_halted = False
+                            logger.info("[Balance] New balance $%.2f detected — CircuitBreaker updated & reset", balance)
+
                 logger.info(
                     "[Balance] Updated: $%.4f equity | $%.4f available (cached for %ds)",
                     equity, available_margin, FETCH_INTERVAL_SECONDS,
@@ -1531,10 +1543,17 @@ async def get_status():
 @app.post("/start", response_model=ActionResponse, tags=["Control"])
 async def start_bot():
     """Start the trading loop."""
+    if _HAS_CB and _engine._cb is not None:
+        _engine._cb.halted_until         = None
+        _engine._cb._is_emergency_halted = False
+        _engine._cb.daily_realized_pnl   = 0.0
+        _engine._cb.daily_drawdown_pct   = 0.0
+        _engine._cb.trailing_drawdown_pct= 0.0
+
     if _engine.state["status"] == "RUNNING":
         return ActionResponse(success=False, message="Already running.", timestamp=_ts())
     _engine.state["status"] = "RUNNING"
-    logger.info("[API] Bot STARTED via /start")
+    logger.info("[API] Bot STARTED via /start (CircuitBreaker reset)")
     await _ws_mgr.broadcast({"type": "STATUS_CHANGE", "status": "RUNNING", "timestamp": _ts()})
     return ActionResponse(success=True, message="Trading loop started.", timestamp=_ts())
 
