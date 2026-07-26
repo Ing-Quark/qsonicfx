@@ -29,6 +29,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
+import pandas as pd
 
 logger = logging.getLogger("QSonicFX.ExchangeConnector")
 logger.setLevel(logging.INFO)
@@ -291,7 +292,7 @@ class BybitLinearConnector(BaseExchangeClient):
         symbol  : str,
         interval: str = "1",    # Bybit interval: "1"=1m, "5"=5m, "60"=1h
         limit   : int = 60,     # Number of candles — need ≥ period*2 (40) for ADX
-    ) -> "pd.DataFrame":        # noqa: F821  (import inside method)
+    ) -> pd.DataFrame:
         """
         Fetch OHLCV klines from Bybit V5 /v5/market/kline.
 
@@ -299,8 +300,6 @@ class BybitLinearConnector(BaseExchangeClient):
             [open, high, low, close, volume] and a UTC DatetimeIndex.
         Returns an empty DataFrame on failure (caller must handle).
         """
-        import pandas as pd
-
         res = self._request(
             "GET",
             "/v5/market/kline",
