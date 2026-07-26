@@ -637,11 +637,10 @@ def _ensure_ws() -> None:
         thread.start()
         st.session_state["ws_thread"] = thread
 
-def refresh_data() -> None:
-    """Fetch data from API — throttled to max once per 2 seconds to avoid
-    blocking the UI on every Streamlit rerun."""
+def refresh_data(force: bool = False) -> None:
+    """Fetch data from API — throttled to max once per 2 seconds unless forced."""
     now = time.monotonic()
-    if now - st.session_state.get("_last_refresh", 0) < 2.0:
+    if not force and (now - st.session_state.get("_last_refresh", 0) < 2.0):
         return
     st.session_state["_last_refresh"] = now
 
@@ -650,6 +649,9 @@ def refresh_data() -> None:
         st.session_state["last_status_data"] = status_data
         st.session_state["status"]           = status_data.get("status", "OFFLINE")
         st.session_state["error_msg"]        = None
+        bal = float(status_data.get("account_balance", 0.0) or 0.0)
+        if bal > 0:
+            st.session_state["account_balance"] = bal
 
     perf = get_performance()
     if perf:
@@ -666,7 +668,7 @@ def refresh_data() -> None:
         st.session_state["equity_history"] = pts[-MAX_EQUITY_PTS:]
 
 # Always execute refresh_data() on every Streamlit script execution
-refresh_data()
+refresh_data(force=True)
 
 # ---------------------------------------------------------------------------
 # Flat High-Contrast Plotly Chart

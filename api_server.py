@@ -591,11 +591,27 @@ class TradingEngine:
         else:
             self._notifier = None
 
-        # ── FIX #4: Security check for loaded credentials ────────────────
-        if not self.config.api_key or not self.config.secret_key:
-            logger.warning("[Security] WARNING: BYBIT_API_KEY not set in .env — running without exchange connectivity")
-        else:
-            logger.info("[Security] Bybit API credentials loaded from .env — connection test: PASS")
+        # Pre-fetch live balance immediately on engine startup
+        if self.live_connector is not None and self.config.exchange_mode != "SIMULATED":
+            try:
+                bal_data = self.live_connector.fetch_balance()
+                eq = float(bal_data.get("equity", 0.0) or 0.0)
+                bal = float(bal_data.get("balance", 0.0) or 0.0)
+                avail = float(bal_data.get("available_margin", 0.0) or 0.0)
+                if bal > 0:
+                    self._cached_balance = {
+                        "equity": eq, "balance": bal, "available_margin": avail,
+                        "last_updated": datetime.now(timezone.utc),
+                    }
+                    self.config.account_balance = bal
+                    if self._cb is not None:
+                        self._cb.current_balance = bal
+                        self._cb.peak_balance = bal
+                        self._cb.initial_balance = bal
+                        self._cb.initial_daily_balance = bal
+                    logger.info("[Startup] Live balance pre-fetched: $%.4f USDT", bal)
+            except Exception as e:
+                logger.warning("[Startup] Pre-fetch balance failed: %s", e)
 
         logger.info(
             "[Engine] Initialized | regime=%s obi=%s sizer=%s cb=%s wfo=%s notify=%s",
