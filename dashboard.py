@@ -502,6 +502,7 @@ def get_status()        -> Optional[Dict]: return _api("GET",  "/status")
 def get_performance()   -> Optional[Dict]: return _api("GET",  "/performance")
 def get_latest_signal() -> Optional[Dict]: return _api("GET",  "/signals/latest")
 def get_equity()        -> Optional[Dict]: return _api("GET",  "/equity")
+def get_coins()         -> Optional[Dict]: return _api("GET",  "/coins")
 def post_start()        -> Optional[Dict]: return _api("POST", "/start")
 def post_pause()        -> Optional[Dict]: return _api("POST", "/pause")
 def post_stop()         -> Optional[Dict]: return _api("POST", "/stop")
@@ -1051,13 +1052,21 @@ def _render_left_config() -> None:
         ["BYBIT_TESTNET", "BYBIT_LIVE", "BINANCE_TESTNET", "BINANCE_LIVE", "BITGET_LIVE", "SIMULATED"],
         index=0
     )
-    st.session_state["symbol"]   = st.selectbox(
+    coin_data = get_coins()
+    candidates = coin_data.get("candidates", []) if coin_data else []
+    active_sym = coin_data.get("active_symbol", "BTCUSDT") if coin_data else "BTCUSDT"
+
+    dynamic_symbols = [c["symbol"] for c in candidates] if candidates else [
+        "BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT", "PEPEUSDT",
+        "XRPUSDT", "SUIUSDT", "AVAXUSDT", "LINKUSDT", "NEARUSDT"
+    ]
+    if active_sym not in dynamic_symbols:
+        dynamic_symbols.insert(0, active_sym)
+
+    st.session_state["symbol"] = st.selectbox(
         "SYMBOL",
-        [
-            "BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT", "PEPEUSDT",
-            "XRPUSDT", "SUIUSDT", "AVAXUSDT", "LINKUSDT", "NEARUSDT",
-            "APTUSDT", "WIFUSDT", "BNBUSDT", "SHIBUSDT", "ADAUSDT"
-        ]
+        dynamic_symbols,
+        index=0
     )
     st.session_state["interval"] = st.selectbox("RESOLUTION", ["1m", "5m", "15m", "1h"])
     

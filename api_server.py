@@ -160,6 +160,23 @@ except ImportError as e:
     init_db  = None   # type: ignore
     get_db   = None   # type: ignore
 
+# ── New modules for autonomy upgrade ──────────────────────────────
+try:
+    from coin_scanner import CoinScanner, CoinCandidate, ScanResult
+    _HAS_SCANNER = True
+    logger.info("[Startup] coin_scanner loaded OK")
+except ImportError:
+    _HAS_SCANNER = False
+    CoinScanner = None  # type: ignore
+
+try:
+    from account_detector import AccountDetector, AccountProfile, should_trade_spot
+    _HAS_DETECTOR = True
+    logger.info("[Startup] account_detector loaded OK")
+except ImportError:
+    _HAS_DETECTOR = False
+    AccountDetector = None  # type: ignore
+
 # ---------------------------------------------------------------------------
 # Pydantic v2 schemas
 # ---------------------------------------------------------------------------
@@ -264,6 +281,14 @@ class BotConfig:
         self.secret_key            : str   = os.getenv("BYBIT_SECRET_KEY", "")
         self.passphrase            : str   = os.getenv("BYBIT_PASSPHRASE", "")
         self.autopilot_mode        : bool  = True    # Default Autonomous AI Quant Brain enabled
+
+        # ── Autonomy Upgrade fields ───────────────────────────────
+        self.scan_interval_seconds : float = float(os.getenv("SCAN_INTERVAL_SECONDS", "300.0"))     # Re-scan every 5 minutes
+        self.last_scan_ts          : float = 0.0                  # Timestamp of last scan
+        self.active_candidates     : List[Dict] = []         # Last scan result (for /coins endpoint)
+        self.account_profile       : Optional[Dict] = None     # Cached account profile
+        self.account_type          : str   = "UNIFIED"
+        self.trading_mode          : str   = os.getenv("TRADING_MODE", "AUTO").lower()              # "spot", "futures", or "auto"
 
     def update(self, params: ParametersUpdate) -> List[str]:
         """Apply a ParametersUpdate and return list of changed keys."""
@@ -521,6 +546,11 @@ class TradingEngine:
         self._regime_updated_this_minute: bool = False       # guard: log on change only
         self._regime_fetch_task: Optional[asyncio.Task] = None
 
+        # ── Autonomy components ──────────────────────────────────────────────
+        self.coin_scanner = CoinScanner(max_pairs=100) if _HAS_SCANNER and CoinScanner is not None else None
+        self.account_detector = AccountDetector() if _HAS_DETECTOR and AccountDetector is not None else None
+        self._scan_task: Optional[asyncio.Task] = None
+
         self._init_components()
 
     def _init_components(self) -> None:
@@ -699,6 +729,122 @@ class TradingEngine:
 
             await asyncio.sleep(FETCH_INTERVAL_SECONDS)
 
+    # ── Autonomy Background Scan Loop ───────────────────────────────────────
+
+    async def _coin_scan_loop(self) -> None:
+        """
+        Background task: re-scans all Bybit pairs every scan_interval_seconds.
+        Auto-selects best coin and switches symbol. Auto-detects account mode.
+        First run: IMMEDIATE.
+        """
+        SCAN_INTERVAL = self.config.scan_interval_seconds
+        logger.info("[Scanner] Background scan loop started. First scan immediately.")
+
+        while True:
+            try:
+                # ── 1. Detect account type & balance ──────────────────────
+                if self.account_detector:
+                    profile = await self.account_detector.detect(
+                        self.live_connector or self.exchange
+                    )
+                    self.config.account_profile = {
+                        "account_type": profile.account_type,
+                        "balance": profile.balance,
+                        "mode": profile.mode,
+                        "min_notional": profile.min_notional_default,
+                    }
+                    self.config.trading_mode = profile.mode
+
+                    # Update balance cache
+                    if profile.balance > 0:
+                        self._cached_balance["balance"] = profile.balance
+                        self._cached_balance["equity"] = profile.balance
+                        self._cached_balance["available_margin"] = profile.available_balance
+
+                # ── 2. Scan and rank coins ────────────────────────────────
+                if self.coin_scanner and (
+                    self.live_connector or hasattr(self.exchange, "get_candles")
+                ):
+                    exchange_client = self.live_connector or self.exchange
+                    current_bal = self.config.account_profile.get("balance", 0.0) if self.config.account_profile else 0.0
+                    if current_bal <= 0:
+                        current_bal = self._cached_balance.get("balance", 0.0)
+                    if current_bal <= 0:
+                        current_bal = self.config.account_balance or 5.0  # fallback
+
+                    result = await self.coin_scanner.scan(
+                        exchange=exchange_client,
+                        balance=current_bal,
+                        current_regime=self.state.get("current_regime", "RANGING"),
+                    )
+
+                    # Cache candidates for /coins endpoint
+                    self.config.active_candidates = [
+                        {
+                            "rank": i + 1,
+                            "symbol": c.symbol,
+                            "price": c.price,
+                            "volume_24h": c.volume_24h,
+                            "volatility_24h": round(c.volatility_24h, 4),
+                            "obi_score": round(c.obi_raw, 4),
+                            "composite_score": c.composite_score,
+                            "min_qty": c.min_qty,
+                            "fits_balance": c.fits_balance(current_bal),
+                        }
+                        for i, c in enumerate(result.candidates[:10])
+                    ]
+
+                    # ── 3. Switch to best pair if different ───────────────
+                    if result.top_pick and result.top_pick.symbol != self.config.symbol:
+                        old_symbol = self.config.symbol
+                        self.config.symbol = result.top_pick.symbol
+
+                        # Auto-tune parameters based on asset class
+                        if result.top_pick.is_meme:
+                            self.config.max_risk_per_trade = 0.01
+                            self.config.kelly_fraction = 0.15
+                            self.config.obi_threshold = 1.2
+                        else:
+                            self.config.max_risk_per_trade = 0.02
+                            self.config.kelly_fraction = 0.25
+                            self.config.obi_threshold = 1.5
+
+                        logger.info(
+                            "[Scanner] 🔄 SWITCHED: %s → %s (score=%.3f, vol=%.4f, obi=%+.4f, mode=%s)",
+                            old_symbol, result.top_pick.symbol,
+                            result.top_pick.composite_score,
+                            result.top_pick.volatility_24h,
+                            result.top_pick.obi_raw,
+                            self.config.trading_mode,
+                        )
+
+                        # Log event to Supabase
+                        if _HAS_DB:
+                            async def _log_switch(old: str, new: str) -> None:
+                                try:
+                                    await db_module.log_event(
+                                        "COIN_SWITCH",
+                                        f"Auto-switch: {old} → {new} (score={result.top_pick.composite_score})",
+                                        {"old_symbol": old, "new_symbol": new, "score": result.top_pick.composite_score},
+                                    )
+                                except Exception:
+                                    pass
+                            asyncio.ensure_future(_log_switch(old_symbol, result.top_pick.symbol))
+
+                    else:
+                        logger.debug(
+                            "[Scanner] Top pick unchanged: %s (score=%.3f)",
+                            result.top_pick.symbol if result.top_pick else "NONE",
+                            result.top_pick.composite_score if result.top_pick else 0,
+                        )
+
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("[Scanner] Scan cycle failed: %s", exc, exc_info=True)
+
+            await asyncio.sleep(SCAN_INTERVAL)
+
     # ── State helpers ──────────────────────────────────────────────────
 
     @property
@@ -842,36 +988,20 @@ async def trading_loop(engine: TradingEngine, ws_mgr: ConnectionManager) -> None
 
             # ── 1. Autopilot AI Quant Brain (Multi-Asset Auto-Scanner & Dynamic Risk Tuner) ──
             if getattr(cfg, "autopilot_mode", True) and engine.state.get("current_position") is None:
-                autopilot_universe = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT", "PEPEUSDT", "SUIUSDT", "AVAXUSDT"]
-                best_symbol = cfg.symbol
-                best_score  = 0.0
-
-                if engine.live_connector is not None:
-                    for test_sym in autopilot_universe[:4]:  # Fast scan top candidates
-                        try:
-                            ob = engine.live_connector.fetch_orderbook(test_sym, limit=5)
-                            bids = ob.get("bids", [])
-                            asks = ob.get("asks", [])
-                            if bids and asks:
-                                bv = sum(q for p, q in bids[:3])
-                                av = sum(q for p, q in asks[:3])
-                                score = abs(bv - av) / (bv + av + 1e-6)
-                                if score > best_score:
-                                    best_score  = score
-                                    best_symbol = test_sym
-                        except Exception:
-                            pass
-
-                cfg.symbol = best_symbol
-                # Auto-tune risk based on asset volatility profile
-                if cfg.symbol in ("PEPEUSDT", "DOGEUSDT", "WIFUSDT", "SHIBUSDT"):
-                    cfg.max_risk_per_trade = 0.01  # 1% max risk on explosive meme coins
-                    cfg.kelly_fraction     = 0.15  # Conservative Kelly
-                    cfg.obi_threshold      = 1.2   # Lower OBI threshold for fast moves
-                else:
-                    cfg.max_risk_per_trade = 0.02  # 2% risk on liquid bluechips
-                    cfg.kelly_fraction     = 0.25  # 25% Kelly sizing
-                    cfg.obi_threshold      = 1.5
+                # Symbol already set by background coin_scan_loop. If still default BTCUSDT and balance < $10,
+                # trigger an immediate emergency scan cycle.
+                if cfg.symbol == "BTCUSDT" and cfg.account_balance < 10.0:
+                    logger.info("[Loop] BTCUSDT too expensive for $%.2f balance — triggering emergency scan", cfg.account_balance)
+                    if engine.coin_scanner:
+                        exchange_client = engine.live_connector or engine.exchange
+                        scan_res = await engine.coin_scanner.scan(
+                            exchange=exchange_client,
+                            balance=cfg.account_balance,
+                            current_regime=engine.state.get("current_regime", "RANGING"),
+                        )
+                        if scan_res.top_pick:
+                            cfg.symbol = scan_res.top_pick.symbol
+                            logger.info("[Loop] 🔄 Emergency switch to %s", cfg.symbol)
 
             # ── 2. Fetch market data from live_connector or simulated exchange ───
             if engine.live_connector is not None:
@@ -1257,6 +1387,14 @@ async def lifespan(app: FastAPI):
     )
     logger.info("[Lifespan] Regime detection task started (update every 60s).")
 
+    # ── Autonomy: Start coin scanner & account detector background task ──
+    if _HAS_SCANNER and _engine.coin_scanner:
+        _engine._scan_task = asyncio.create_task(
+            _engine._coin_scan_loop(),
+            name="coin_scan_loop",
+        )
+        logger.info("[Lifespan] Coin scan loop started (scan every %ds).", _config.scan_interval_seconds)
+
     _loop_task = asyncio.create_task(
         trading_loop(_engine, _ws_mgr),
         name="trading_loop",
@@ -1266,6 +1404,15 @@ async def lifespan(app: FastAPI):
     # ── Shutdown ────────────────────────────────────────────────────
     logger.info("[Lifespan] Shutting down...")
     _engine.state["status"] = "PAUSED"
+
+    # ── Autonomy: Cancel scan task ──────────────────────────────────
+    if _engine._scan_task and not _engine._scan_task.done():
+        _engine._scan_task.cancel()
+        try:
+            await asyncio.wait_for(_engine._scan_task, timeout=3.0)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
+        logger.info("[Lifespan] Coin scan task cancelled.")
 
     # ── FIX #1: Cancel balance cache task ───────────────────────────────
     if _engine._balance_fetch_task and not _engine._balance_fetch_task.done():
@@ -1514,6 +1661,26 @@ async def update_parameters(params: ParametersUpdate):
 async def get_equity_curve():
     """Return last 1000 equity curve points."""
     return {"points": list(_engine._equity_curve), "count": len(_engine._equity_curve)}
+
+
+@app.get("/coins", tags=["Scanner"])
+async def get_coin_candidates():
+    """
+    Returns the latest scanned coin ranking from the autonomous scanner.
+    10 ranked candidates with scores, prices, and balance-fit status.
+    """
+    candidates = _config.active_candidates
+    profile = _config.account_profile
+    return {
+        "candidates": candidates,
+        "total_candidates": len(candidates),
+        "active_symbol": _config.symbol,
+        "account_type": profile.get("account_type", "UNKNOWN") if profile else "UNKNOWN",
+        "trading_mode": _config.trading_mode,
+        "balance": profile.get("balance", 0.0) if profile else 0.0,
+        "last_scan_ms": _config.last_scan_ts,
+        "timestamp": _ts(),
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -329,6 +329,45 @@ class BybitLinearConnector(BaseExchangeClient):
         logger.debug("[fetch_klines] %s: %d bars fetched (interval=%s)", symbol, len(df), interval)
         return df
 
+    def fetch_instruments_info(self, category: str = "linear") -> List[Dict[str, Any]]:
+        """
+        Fetch all active USDT linear perpetual contracts from Bybit V5.
+        Returns list of dicts with symbol, status, min_qty, min_notional, price_filter.
+        Endpoint: GET /v5/market/instruments-info?category=linear
+        """
+        res = self._request("GET", "/v5/market/instruments-info", {
+            "category": category,
+            "status": "Trading",
+        })
+        raw_list = res.get("result", {}).get("list", [])
+        if not raw_list:
+            logger.warning("[fetch_instruments_info] Empty list for category=%s", category)
+            return []
+
+        instruments = []
+        for item in raw_list:
+            symbol = item.get("symbol", "")
+            if not symbol.endswith("USDT"):
+                continue
+
+            lot_size_filter = item.get("lotSizeFilter", {})
+            price_filter = item.get("priceFilter", {})
+
+            instruments.append({
+                "symbol": symbol,
+                "status": item.get("status", ""),
+                "min_qty": float(lot_size_filter.get("minOrderQty", "0.001")),
+                "max_qty": float(lot_size_filter.get("maxOrderQty", "100000")),
+                "qty_step": float(lot_size_filter.get("qtyStep", "0.001")),
+                "min_notional": float(lot_size_filter.get("minNotionalValue", "1.0") or "1.0"),
+                "tick_size": float(price_filter.get("tickSize", "0.01")),
+                "min_price": float(price_filter.get("minPrice", "0.01")),
+                "leverage_filter": item.get("leverageFilter", {}),
+            })
+
+        logger.info("[fetch_instruments_info] %s: %d active linear USDT pairs loaded", category, len(instruments))
+        return instruments
+
 
 # ===========================================================================
 # 2. Binance USDT-M Futures Connector
