@@ -1561,6 +1561,28 @@ async def start_bot():
         _engine._cb.daily_drawdown_pct   = 0.0
         _engine._cb.trailing_drawdown_pct= 0.0
 
+    # Fetch live balance immediately on start
+    if _engine.live_connector is not None and _engine.config.exchange_mode != "SIMULATED":
+        try:
+            bal_data = await asyncio.to_thread(_engine.live_connector.fetch_balance)
+            eq = float(bal_data.get("equity", 0.0) or 0.0)
+            bal = float(bal_data.get("balance", 0.0) or 0.0)
+            avail = float(bal_data.get("available_margin", 0.0) or 0.0)
+            if bal > 0:
+                _engine._cached_balance = {
+                    "equity": eq, "balance": bal, "available_margin": avail,
+                    "last_updated": datetime.now(timezone.utc),
+                }
+                _engine.config.account_balance = bal
+                if _HAS_CB and _engine._cb is not None:
+                    _engine._cb.current_balance = bal
+                    _engine._cb.peak_balance = max(_engine._cb.peak_balance, bal)
+                    if _engine._cb.initial_balance <= 1.0:
+                        _engine._cb.initial_balance = bal
+                        _engine._cb.initial_daily_balance = bal
+        except Exception as e:
+            logger.warning("[API] Live balance fetch on start failed: %s", e)
+
     if _engine.state["status"] == "RUNNING":
         return ActionResponse(success=False, message="Already running.", timestamp=_ts())
     _engine.state["status"] = "RUNNING"

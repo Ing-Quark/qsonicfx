@@ -35,6 +35,15 @@ logger = logging.getLogger("QSonicFX.ExchangeConnector")
 logger.setLevel(logging.INFO)
 
 
+def _safe_float(val: Any, default: float = 0.0) -> float:
+    if val is None or val == "":
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
 # ===========================================================================
 # Abstract Base Class: BaseExchangeClient
 # ===========================================================================
@@ -132,7 +141,8 @@ class BybitLinearConnector(BaseExchangeClient):
     def _request(
         self, method: str, endpoint: str, params: Optional[Dict] = None
     ) -> Dict[str, Any]:
-        """Execute signed HTTP request to Bybit V5 REST API."""
+        """Execute signed HTTP request to Bybit V5 REST API using requests with urllib fallback."""
+        import requests
         url = f"{self.base_url}{endpoint}"
         ts = str(int(time.time() * 1000))
         recv_window = "5000"
@@ -158,20 +168,26 @@ class BybitLinearConnector(BaseExchangeClient):
         if self.api_key and self.secret_key:
             headers["X-BAPI-SIGN"] = self._sign(ts, recv_window, body_str)
 
-        req = urllib.request.Request(
-            url,
-            data=body_str.encode("utf-8") if method.upper() != "GET" and body_str else None,
-            headers=headers,
-            method=method.upper(),
-        )
-
         try:
-            with urllib.request.urlopen(req, timeout=5.0) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                return data
-        except Exception as e:
-            logger.warning(f"Bybit V5 REST request failed [{endpoint}]: {e}")
-            return {"retCode": -1, "retMsg": str(e), "result": {}}
+            if method.upper() == "GET":
+                resp = requests.get(url, headers=headers, timeout=10.0)
+            else:
+                resp = requests.request(method.upper(), url, data=body_str, headers=headers, timeout=10.0)
+            return resp.json()
+        except Exception:
+            # Fallback to urllib if requests encounters issue
+            try:
+                req = urllib.request.Request(
+                    url,
+                    data=body_str.encode("utf-8") if method.upper() != "GET" and body_str else None,
+                    headers=headers,
+                    method=method.upper(),
+                )
+                with urllib.request.urlopen(req, timeout=10.0) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+            except Exception as e:
+                logger.warning(f"Bybit V5 REST request failed [{endpoint}]: {e}")
+                return {"retCode": -1, "retMsg": str(e), "result": {}}
 
     def fetch_ticker(self, symbol: str) -> Dict[str, Any]:
         res = self._request("GET", "/v5/market/tickers", {"category": "linear", "symbol": symbol})
@@ -180,10 +196,10 @@ class BybitLinearConnector(BaseExchangeClient):
             t = list_items[0]
             return {
                 "symbol": symbol,
-                "last_price": float(t.get("lastPrice", 0.0)),
-                "bid_price": float(t.get("bid1Price", 0.0)),
-                "ask_price": float(t.get("ask1Price", 0.0)),
-                "volume_24h": float(t.get("volume24h", 0.0)),
+                "last_price": _safe_float(t.get("lastPrice")),
+                "bid_price": _safe_float(t.get("bid1Price")),
+                "ask_price": _safe_float(t.get("ask1Price")),
+                "volume_24h": _safe_float(t.get("volume24h")),
             }
         return {"symbol": symbol, "last_price": 0.0, "bid_price": 0.0, "ask_price": 0.0, "volume_24h": 0.0}
 
@@ -193,8 +209,8 @@ class BybitLinearConnector(BaseExchangeClient):
         raw_bids = result.get("b", [])
         raw_asks = result.get("a", [])
 
-        bids = [[float(p), float(q)] for p, q in raw_bids]
-        asks = [[float(p), float(q)] for p, q in raw_asks]
+        bids = [[_safe_float(p), _safe_float(q)] for p, q in raw_bids]
+        asks = [[_safe_float(p), _safe_float(q)] for p, q in raw_asks]
 
         ob_data = {
             "symbol": symbol,
@@ -216,18 +232,25 @@ class BybitLinearConnector(BaseExchangeClient):
             if res.get("retCode") == 0:
                 list_data = res.get("result", {}).get("list", [])
                 if list_data:
-                    coins = list_data[0].get("coin", [])
-                    for c in coins:
-                        wb = float(c.get("walletBalance", 0) or 0)
-                        eq = float(c.get("equity", 0) or wb)
-                        avail = float(c.get("availableToWithdraw", 0) or wb)
-                        coin_name = c.get("coin", "")
-                        if coin_name == "USDT":
-                            total_balance += wb
-                            total_equity += eq
-                            avail_margin += avail
-                        elif wb > 0 and coin_name != "USDT":
-                            total_equity += eq
+                    acct_item = list_data[0]
+                    total_balance = _safe_float(acct_item.get("totalWalletBalance"))
+                    total_equity  = _safe_float(acct_item.get("totalEquity"), total_balance)
+                    avail_margin  = _safe_float(acct_item.get("totalAvailableBalance"), total_balance)
+
+                    # If account totals are 0, sum coin-level items safely
+                    if total_balance == 0.0:
+                        coins = acct_item.get("coin", [])
+                        for c in coins:
+                            wb = _safe_float(c.get("walletBalance"))
+                            eq = _safe_float(c.get("equity"), wb)
+                            avail = _safe_float(c.get("availableToWithdraw"), wb)
+                            coin_name = c.get("coin", "")
+                            if coin_name == "USDT":
+                                total_balance += wb
+                                total_equity  += eq
+                                avail_margin  += avail
+                            elif wb > 0 and coin_name != "USDT":
+                                total_equity += eq
         except Exception as e:
             logger.warning("[fetch_balance] UNIFIED balance query failed: %s", e)
 
@@ -235,7 +258,7 @@ class BybitLinearConnector(BaseExchangeClient):
         if total_balance == 0.0:
             try:
                 res_f = self._request("GET", "/v5/asset/transfer/query-account-coin-balance", {"accountType": "FUND", "coin": "USDT"})
-                bal_f = float(res_f.get("result", {}).get("balance", {}).get("walletBalance", 0.0) or 0.0)
+                bal_f = _safe_float(res_f.get("result", {}).get("balance", {}).get("walletBalance"))
                 if bal_f > 0:
                     total_balance = bal_f
                     total_equity = bal_f
