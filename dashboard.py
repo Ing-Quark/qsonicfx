@@ -510,6 +510,23 @@ _init_state()
 if _HAS_AUTOREFRESH:
     st_autorefresh(interval=2000, key="hft_live_refresh_ticker")
 
+components.html("""
+<script>
+(function() {
+    if (!window._hftAutoRerunTimer) {
+        window._hftAutoRerunTimer = setInterval(function() {
+            try {
+                if (window.parent && window.parent.document) {
+                    var refreshBtn = window.parent.document.querySelector('button[title="Rerun"]');
+                    if (refreshBtn) { refreshBtn.click(); }
+                }
+            } catch(e) {}
+        }, 2000);
+    }
+})();
+</script>
+""", height=0, width=0)
+
 # ---------------------------------------------------------------------------
 # API Communication Layer
 # ---------------------------------------------------------------------------
