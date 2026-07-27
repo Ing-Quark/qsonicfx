@@ -14,6 +14,4 @@ echo "[Q-SonicFX] Launching Streamlit dashboard on 0.0.0.0:$PORT_TO_USE..."
 exec streamlit run dashboard.py \
     --server.address 0.0.0.0 \
     --server.port $PORT_TO_USE \
-    --server.headless true \
-    --server.enableCORS false \
-    --server.enableXsrfProtection false
+    --server.headless true
