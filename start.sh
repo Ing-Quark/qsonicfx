@@ -12,19 +12,19 @@ if [[ "$SERVICE_LOWER" == *"dashboard"* ]]; then
 elif [[ "$SERVICE_LOWER" == *"api"* ]]; then
     exec bash start_api.sh
 else
-    echo "[Q-SonicFX] Combined Mode: Starting FastAPI backend on 127.0.0.1:8000..."
-    export API_URL="http://127.0.0.1:8000"
-    uvicorn api_server:app --host 127.0.0.1 --port 8000 --log-level info &
+    echo "[Q-SonicFX] Combined Mode: Starting FastAPI backend on internal port 127.0.0.1:8001..."
+    export API_URL="http://127.0.0.1:8001"
+    uvicorn api_server:app --host 127.0.0.1 --port 8001 --log-level info &
     UVICORN_PID=$!
-    echo "[Q-SonicFX] Waiting for FastAPI to be ready (PID: $UVICORN_PID)..."
+    echo "[Q-SonicFX] Waiting for FastAPI on 127.0.0.1:8001 (PID: $UVICORN_PID)..."
     for i in $(seq 1 30); do
-        if curl -sf http://127.0.0.1:8000/ > /dev/null 2>&1; then
-            echo "[Q-SonicFX] FastAPI is ready after ${i}s. Launching Streamlit on port $PORT_TO_USE..."
+        if curl -sf http://127.0.0.1:8001/ > /dev/null 2>&1; then
+            echo "[Q-SonicFX] FastAPI ready on port 8001 after ${i}s. Launching Streamlit dashboard on public port $PORT_TO_USE..."
             break
         fi
         sleep 1
     done
-    echo "[Q-SonicFX] Launching Streamlit dashboard..."
+    echo "[Q-SonicFX] Launching Streamlit dashboard on port $PORT_TO_USE..."
     exec streamlit run dashboard.py \
         --server.address 0.0.0.0 \
         --server.port $PORT_TO_USE \

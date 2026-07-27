@@ -543,6 +543,8 @@ def _get_candidate_base_urls() -> List[str]:
     if env_api := os.getenv("API_URL"):
         urls.append(env_api.rstrip("/"))
     urls.extend([
+        "http://127.0.0.1:8001",
+        "http://localhost:8001",
         "http://127.0.0.1:8000",
         "http://localhost:8000",
         "https://api-production-c4f93.up.railway.app",
