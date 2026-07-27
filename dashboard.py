@@ -538,24 +538,49 @@ def _headers() -> Dict[str, str]:
         h["X-API-Key"] = st.session_state["api_key"]
     return h
 
+def _get_candidate_base_urls() -> List[str]:
+    urls = []
+    if env_api := os.getenv("API_URL"):
+        urls.append(env_api.rstrip("/"))
+    urls.extend([
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+        "https://api-production-c4f93.up.railway.app",
+        "http://api.railway.internal:8000",
+    ])
+    # Deduplicate while preserving order
+    seen = set()
+    return [u for u in urls if not (u in seen or seen.add(u))]
+
 def _api(
     method  : str,
     endpoint: str,
     payload : Optional[Dict] = None,
     timeout : float = 2.5,
 ) -> Optional[Dict]:
-    try:
-        url = f"{BASE_URL}{endpoint}"
-        resp = requests.request(
-            method, url,
-            json    = payload,
-            headers = _headers(),
-            timeout = timeout,
-        )
-        resp.raise_for_status()
-        return resp.json()
-    except Exception:
-        return None
+    candidate_urls = _get_candidate_base_urls()
+    
+    # Try preferred BASE_URL first if already established in session state
+    if active_url := st.session_state.get("_active_api_url"):
+        if active_url in candidate_urls:
+            candidate_urls.remove(active_url)
+        candidate_urls.insert(0, active_url)
+
+    for base in candidate_urls:
+        try:
+            url = f"{base}{endpoint}"
+            resp = requests.request(
+                method, url,
+                json    = payload,
+                headers = _headers(),
+                timeout = timeout,
+            )
+            resp.raise_for_status()
+            st.session_state["_active_api_url"] = base
+            return resp.json()
+        except Exception:
+            continue
+    return None
 
 def get_status()        -> Optional[Dict]: return _api("GET",  "/status")
 def get_performance()   -> Optional[Dict]: return _api("GET",  "/performance")
