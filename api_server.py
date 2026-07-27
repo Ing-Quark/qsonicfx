@@ -494,7 +494,7 @@ class TradingEngine:
 
         # Shared mutable state (all reads/writes on asyncio event loop — no lock needed)
         self.state: Dict[str, Any] = {
-            "status"          : "PAUSED",
+            "status"          : "OFFLINE",
             "current_regime"  : "UNKNOWN",
             "current_position": None,
             "daily_pnl"       : 0.0,

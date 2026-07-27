@@ -498,6 +498,7 @@ def _init_state() -> None:
         "max_risk"        : 2.0,
         "obi_threshold"   : 1.5,
         "last_ws_msg"     : None,
+        "_last_refresh"   : 0,   # Force immediate data fetch on first load
         "error_msg"       : None,
     }
     for k, v in defaults.items():
@@ -1224,10 +1225,9 @@ def main() -> None:
             _render_controls()
             _render_risk_params()
 
-        # Native Streamlit Auto-Rerun Loop (Zero Client Timeouts / Pure Python Execution)
-        if st.session_state.get("status") == "RUNNING":
-            time.sleep(2.0)
-            st.rerun()
+        # Native Streamlit Auto-Rerun Loop — Always active to keep balance/telemetry live
+        time.sleep(3.0)
+        st.rerun()
 
 if __name__ == "__main__":
     main()
