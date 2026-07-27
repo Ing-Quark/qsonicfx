@@ -29,9 +29,9 @@ def main():
     print(f"[Q-SonicFX Launcher] Launching Streamlit dashboard on 0.0.0.0:{port}...")
     streamlit_cmd = [
         sys.executable, "-m", "streamlit", "run", "dashboard.py",
-        "--server.address", "0.0.0.0",
-        "--server.port", str(port),
-        "--server.headless", "true"
+        "--server.address=0.0.0.0",
+        f"--server.port={port}",
+        "--server.headless=true"
     ]
     
     streamlit_proc = subprocess.Popen(streamlit_cmd)
