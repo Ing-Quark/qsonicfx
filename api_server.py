@@ -271,7 +271,7 @@ class BotConfig:
         self.adx_period            : int   = 20
         self.account_balance       : float = 0.0       # Clean initial balance
         self.min_interval_seconds  : float = 1.0
-        self.symbol                : str   = "BTCUSDT"
+        self.symbol                : str   = os.getenv("TRADING_SYMBOL", "AUTO")
         self.obi_depth             : int   = 3
         self.rolling_window        : int   = 100
         self.stop_loss_pct         : float = 0.01    # 1% stop from entry
@@ -1046,13 +1046,13 @@ async def trading_loop(engine: TradingEngine, ws_mgr: ConnectionManager) -> None
         try:
             cfg = engine.config
 
-            # ── 1. Autopilot AI Quant Brain (Multi-Asset Auto-Scanner & Dynamic Risk Tuner) ──
-            if getattr(cfg, "autopilot_mode", True) and engine.state.get("current_position") is None:
-                # Symbol check: BTCUSDT requires $6.50 min margin (0.001 BTC). For balance < $10.00,
-                # auto-switch to 1000PEPEUSDT or top micro-cap pair so $1.2008 USDT capital can execute trades!
-                if cfg.symbol == "BTCUSDT" and cfg.account_balance < 10.0:
-                    cfg.symbol = "1000PEPEUSDT"
-                    logger.info("[Loop] Micro-capital balance ($%.4f USDT) — auto-switched active target to 1000PEPEUSDT for live trade execution", cfg.account_balance)
+            # ── 1. Auto-symbol selection via scanner (when autopilot and no open position) ──
+            # The coin_scan_loop background task updates cfg.symbol autonomously.
+            # The trading loop reads cfg.symbol — no hardcoded fallback needed.
+            # If symbol is still "AUTO" (no scan result yet), skip this cycle.
+            if cfg.symbol == "AUTO":
+                await asyncio.sleep(cfg.min_interval_seconds)
+                continue
 
             # ── 2. Fetch market data from live_connector or simulated exchange ───
             if engine.live_connector is not None:
@@ -1144,7 +1144,15 @@ async def trading_loop(engine: TradingEngine, ws_mgr: ConnectionManager) -> None
                         if len(engine._trade_history) < 5:
                             wr, aw, al = 0.55, 0.018, 0.010
 
-                        min_lot = 10.0 if "PEPE" in cfg.symbol or "SHIB" in cfg.symbol or "FLOKI" in cfg.symbol else (1.0 if "DOGE" in cfg.symbol or "XRP" in cfg.symbol else 0.001)
+                        # Use instrument min_qty from scanner cache if available, else dynamic fallback
+                        min_lot = 0.001
+                        if cfg.active_candidates:
+                            for c in cfg.active_candidates:
+                                if c.get("symbol") == cfg.symbol:
+                                    min_lot = float(c.get("min_qty", 0.001) or 0.001)
+                                    break
+                        if min_lot <= 0:
+                            min_lot = 0.001
                         size_result = compute_position_size(
                             account_balance    = cfg.account_balance,
                             win_rate           = wr,
@@ -1167,7 +1175,7 @@ async def trading_loop(engine: TradingEngine, ws_mgr: ConnectionManager) -> None
                             trade_ok = True
                     else:
                         # Fallback: tradeable quantity calculation
-                        qty      = 10.0 if "PEPE" in cfg.symbol else 0.001
+                        qty      = min_lot
                         trade_ok = True
 
                     if trade_ok and qty > 0:

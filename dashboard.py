@@ -1286,9 +1286,8 @@ def main() -> None:
             _render_controls()
             _render_risk_params()
 
-        # Native Streamlit Auto-Rerun Loop — Always active to keep balance/telemetry live
-        time.sleep(3.0)
-        st.rerun()
+        # Auto-refresh handled by st_autorefresh or client-side JS — no blocking loop needed.
+        # Streamlit will re-run naturally when the user interacts or the page timer fires.
 
 if __name__ == "__main__":
     main()

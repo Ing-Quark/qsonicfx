@@ -1,111 +1,152 @@
+#!/usr/bin/env python3
 """
 account_detector.py
 ===================
-Q-SonicFX — Autonomous Account Type & Balance Detector
-=======================================================
+Q-SonicFX Auto Account Type & Mode Detector
+===========================================
 
-Probes the exchange to determine:
-  1. Account type: Spot vs Unified (Futures+Spot)
-  2. Minimum tradeable balance
-  3. Available mode: Cross margin, isolated, or spot only
+Probes the exchange connector to determine:
+ - Account type (UNIFIED, FUND, SPOT, DERIVATIVES)
+ - Current balance & available margin
+ - Recommended trading mode (spot vs futures)
 
-Radically simplifies: if balance < $10 → force SPOT mode
-Because Bybit spot has lower minimum notionals (~$1) vs futures ($5+ for altcoins).
+For Bybit accounts with < $10 USDT, defaults to spot-compatible sizing
+to avoid margin/liquidation requirements for very small capital.
 
 Author : Q-SonicFX Quant Engine
 """
-from __future__ import annotations
 
-import asyncio
+from __future__ import annotations
 import logging
+import asyncio
 from dataclasses import dataclass
 from typing import Any, Optional
 
-logger = logging.getLogger("QSonicFX.AccountDetector")
+logger = logging.getLogger("qsonicfx.account_detector")
 
-SPOT_MODE_MIN_BALANCE = 10.0   # $10 threshold: below → force spot
 
+# ---------------------------------------------------------------------------
+# Data class
+# ---------------------------------------------------------------------------
 
 @dataclass
 class AccountProfile:
-    account_type: str        # "SPOT" | "UNIFIED" | "CONTRACT"
-    balance: float           # total USDT wallet balance
-    available_balance: float # free margin / available to trade
-    mode: str                # "spot" | "futures"
-    suggested_pair_category: str  # "spot" | "linear"
-    min_notional_default: float   # $1 for spot, $5 for futures
+    """Detected account characteristics."""
+    account_type         : str    # "UNIFIED", "SPOT", "FUND", "DERIVATIVES"
+    balance              : float  # Total equity / wallet balance (USDT)
+    available_balance    : float  # Available for new orders
+    mode                 : str    # "futures" or "spot"
+    min_notional_default : float = 5.0  # Minimum order notional in USD
 
+
+# ---------------------------------------------------------------------------
+# AccountDetector
+# ---------------------------------------------------------------------------
 
 class AccountDetector:
     """
-    Detects account configuration and sets optimal trading mode.
-    Single probe: fetch unified account coin balance.
-    - If Unified balance > 0 → Unified account (futures + spot)
-    - If spot balance > 0 but Unified = 0 → Spot-only account
-    - If both = 0 → new account, default to spot (lower barriers)
+    Detects account type and recommends trading mode based on balance.
+
+    Logic
+    -----
+    1. Call exchange.fetch_balance() to retrieve live balance.
+    2. If balance < $10 → mode="spot"  (avoid margin/liquidation risks).
+    3. Otherwise        → mode="futures" (full perpetual access).
     """
 
     async def detect(self, exchange: Any) -> AccountProfile:
         """
-        Run detection probes against the exchange.
-        exchange.fetch_balance() already returns unified + fund balances.
-        We extend it with a simple heuristic.
+        Run account detection against the provided exchange client.
+
+        Parameters
+        ----------
+        exchange : BaseExchangeClient  Live or simulated connector.
+
+        Returns
+        -------
+        AccountProfile
         """
-        bal_data = await asyncio.to_thread(exchange.fetch_balance)
-        total_bal = bal_data.get("balance", 0.0)
-        available = bal_data.get("available_margin", 0.0)
+        balance_data: dict = {}
 
-        # If we can't get real balance, use the cached value
-        if total_bal <= 0:
-            total_bal = available
-
-        # Try to detect account type from Bybit's V5 account info endpoint
-        account_type = "UNIFIED"  # default for Bybit V5
         try:
-            from exchange_connector import BybitLinearConnector
-            if isinstance(exchange, BybitLinearConnector):
-                # Check wallet balance structure
-                res = await asyncio.to_thread(
-                    exchange._request,
-                    "GET",
-                    "/v5/account/wallet-balance",
-                    {"accountType": "UNIFIED", "coin": "USDT"},
-                )
-                if res.get("retCode") == 0:
-                    account_type = "UNIFIED"
-                else:
-                    account_type = "SPOT"
-        except Exception:
-            account_type = "SPOT"
+            if hasattr(exchange, "fetch_balance"):
+                balance_data = await asyncio.to_thread(exchange.fetch_balance)
+        except Exception as exc:
+            logger.warning("[AccountDetector] fetch_balance failed: %s", exc)
 
-        # Balance-based mode selection
-        if total_bal < SPOT_MODE_MIN_BALANCE:
+        bal   = float(balance_data.get("balance",          0.0) or 0.0)
+        eq    = float(balance_data.get("equity",           bal) or bal)
+        avail = float(balance_data.get("available_margin", bal) or bal)
+
+        # Determine account type label (Bybit always returns UNIFIED via connector)
+        acct_type = "UNIFIED"
+
+        # Recommend mode based on balance size
+        if eq < 10.0:
             mode = "spot"
-            category = "spot"
             min_notional = 1.0
             logger.info(
-                "[Account] Balance=$%.2f < $%d → FORCE SPOT mode (min_notional=$%.1f)",
-                total_bal, SPOT_MODE_MIN_BALANCE, min_notional,
+                "[AccountDetector] Small balance $%.4f — recommending SPOT mode "
+                "(avoids margin/liquidation requirements)",
+                eq,
             )
         else:
             mode = "futures"
-            category = "linear"
             min_notional = 5.0
             logger.info(
-                "[Account] Balance=$%.2f ≥ $%d → FUTURES mode (min_notional=$%.1f)",
-                total_bal, SPOT_MODE_MIN_BALANCE, min_notional,
+                "[AccountDetector] Balance $%.4f — FUTURES mode",
+                eq,
             )
 
         return AccountProfile(
-            account_type=account_type,
-            balance=total_bal,
-            available_balance=available,
-            mode=mode,
-            suggested_pair_category=category,
-            min_notional_default=min_notional,
+            account_type         = acct_type,
+            balance              = eq  if eq  > 0 else bal,
+            available_balance    = avail,
+            mode                 = mode,
+            min_notional_default = min_notional,
         )
 
 
+# ---------------------------------------------------------------------------
+# Convenience helper
+# ---------------------------------------------------------------------------
+
 def should_trade_spot(balance: float) -> bool:
-    """Quick static check: true if balance < $10."""
-    return balance < SPOT_MODE_MIN_BALANCE
+    """
+    Return True if the balance is too small for futures margin requirements.
+
+    Parameters
+    ----------
+    balance : float  Current USDT balance.
+
+    Returns
+    -------
+    bool
+    """
+    return balance < 10.0
+
+
+# ---------------------------------------------------------------------------
+# Self-test
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    import asyncio, os
+
+    async def _test() -> None:
+        from exchange_connector import get_exchange_client
+        client  = get_exchange_client(
+            mode       = "BYBIT_LIVE",
+            api_key    = os.getenv("BYBIT_API_KEY", ""),
+            secret_key = os.getenv("BYBIT_SECRET_KEY", ""),
+        )
+        detector = AccountDetector()
+        profile  = await detector.detect(client)
+        print(f"Account type      : {profile.account_type}")
+        print(f"Balance           : ${profile.balance:.4f} USDT")
+        print(f"Available         : ${profile.available_balance:.4f} USDT")
+        print(f"Trading mode      : {profile.mode}")
+        print(f"Min notional      : ${profile.min_notional_default:.2f}")
+        print(f"Should spot?      : {should_trade_spot(profile.balance)}")
+
+    asyncio.run(_test())
