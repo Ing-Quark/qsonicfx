@@ -271,7 +271,7 @@ class BotConfig:
         self.adx_period            : int   = 20
         self.account_balance       : float = 0.0       # Clean initial balance
         self.min_interval_seconds  : float = 1.0
-        self.symbol                : str   = os.getenv("TRADING_SYMBOL", "AUTO")
+        self.symbol                : str   = os.getenv("TRADING_SYMBOL", "BTCUSDT")
         self.obi_depth             : int   = 3
         self.rolling_window        : int   = 100
         self.stop_loss_pct         : float = 0.01    # 1% stop from entry
