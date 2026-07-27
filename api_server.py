@@ -1174,9 +1174,16 @@ async def trading_loop(engine: TradingEngine, ws_mgr: ConnectionManager) -> None
                             qty = max(min_lot, round(raw_qty / min_lot) * min_lot)
                             trade_ok = True
                     else:
-                        # Fallback: tradeable quantity calculation
+                        # Fallback: use scanner cache min_qty or safe default
+                        min_lot = 0.001
+                        if cfg.active_candidates:
+                            for c in cfg.active_candidates:
+                                if c.get("symbol") == cfg.symbol:
+                                    min_lot = float(c.get("min_qty", 0.001) or 0.001)
+                                    break
                         qty      = min_lot
                         trade_ok = True
+
 
                     if trade_ok and qty > 0:
                         # Check circuit breaker
