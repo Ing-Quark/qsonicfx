@@ -5,6 +5,7 @@
     "buildCommand": "pip install -r requirements.txt"
   },
   "deploy": {
+    "startCommand": "bash start.sh",
     "numReplicas": 1,
     "sleepApplication": false,
     "restartPolicyType": "ALWAYS",
