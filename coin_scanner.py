@@ -29,7 +29,7 @@ logger = logging.getLogger("qsonicfx.coin_scanner")
 MEME_SYMBOLS = {
     "PEPE", "FLOKI", "SHIB", "BONK", "WIF", "DOGE",
     "PENGU", "TURBO", "NEIRO", "MOODENG", "BABYDOGE",
-    "POPCAT", "MYRO", "BOME", "BRETT", "MOG", 1000
+    "POPCAT", "MYRO", "BOME", "BRETT", "MOG", "1000"
 }
 
 
@@ -167,7 +167,7 @@ class CoinScanner:
 
             vol_est   = abs(b_pct) + 0.001
             liq_score = min(1.0, vol_usd / 5_000_000.0)
-            is_meme   = any(m in sym.upper() for m in (MEME_SYMBOLS if isinstance(m, str) else str(m) for m in MEME_SYMBOLS))
+            is_meme   = any(m in sym.upper() for m in MEME_SYMBOLS)
 
             # Composite score
             score = liq_score * 3.0 + vol_est * 4.0

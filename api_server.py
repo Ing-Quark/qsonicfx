@@ -735,6 +735,9 @@ class TradingEngine:
         while True:
             try:
                 symbol = self.config.symbol
+                # Use BTCUSDT as safe fallback if scanner hasn't picked a symbol yet
+                if not symbol or symbol == "AUTO":
+                    symbol = "BTCUSDT"
 
                 if self.live_connector is not None and hasattr(self.live_connector, "fetch_klines"):
                     # ── Live mode: pull real Bybit 1m candles ──────────────────
