@@ -1224,5 +1224,10 @@ def main() -> None:
             _render_controls()
             _render_risk_params()
 
+        # Native Streamlit Auto-Rerun Loop (Zero Client Timeouts / Pure Python Execution)
+        if st.session_state.get("status") == "RUNNING":
+            time.sleep(2.0)
+            st.rerun()
+
 if __name__ == "__main__":
     main()

@@ -1536,10 +1536,10 @@ async def get_status():
     """
     pos = _engine.state.get("current_position")
 
-    # ── FIX #1: Read from in-memory cache (no Bybit API call here) ─────────
+    # ── FIX #1: Read effective balance (live fetch fallback if cache is 0) ──
     cache         = _engine._cached_balance
-    last_updated  = cache.get("last_updated")   # datetime or None
-    bal           = float(cache.get("balance", _engine.config.account_balance))
+    last_updated  = cache.get("last_updated")
+    bal           = _engine.get_effective_balance()
 
     # Determine cache freshness
     if last_updated is None:
