@@ -21,11 +21,44 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import os
+import subprocess
+import sys
 import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
 from dotenv import load_dotenv
+
+def _ensure_backend_server() -> None:
+    """Auto-spawns FastAPI api_server.py in background if not already responding."""
+    try:
+        r = requests.get("http://127.0.0.1:8001/status", timeout=0.3)
+        if r.status_code == 200:
+            return
+    except Exception:
+        pass
+
+    try:
+        r = requests.get("http://127.0.0.1:8000/status", timeout=0.3)
+        if r.status_code == 200:
+            return
+    except Exception:
+        pass
+
+    # Spawn uvicorn background process on port 8001
+    if not st.session_state.get("_backend_spawned"):
+        st.session_state["_backend_spawned"] = True
+        try:
+            subprocess.Popen(
+                [
+                    sys.executable, "-m", "uvicorn", "api_server:app",
+                    "--host", "127.0.0.1", "--port", "8001", "--log-level", "info"
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
 
 try:
     from streamlit_autorefresh import st_autorefresh
@@ -1223,6 +1256,7 @@ def _render_live_telemetry() -> None:
     _render_top_strip()
 
 def main() -> None:
+    _ensure_backend_server()
     _ensure_ws()
 
     app_container = st.container()
